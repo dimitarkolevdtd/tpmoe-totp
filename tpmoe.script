@@ -1,0 +1,123 @@
+Window.SetBackgroundTopColor(0.667, 0.898, 0.643);
+Window.SetBackgroundBottomColor(0.667, 0.898, 0.643);
+
+global.banner;
+global.totp;
+global.dialog;
+
+fun VerticalAlign() {
+	if (!banner.GetImage() && !totp[0].sprite.GetImage())
+		DisplayBanner();
+
+	isDialog = 0;
+	if (dialog.q.GetImage()) isDialog = 1;
+
+	banner.SetY(Window.GetHeight()/(2 + isDialog*0.4) - banner.GetImage().GetHeight()/2);
+	for (i = 0; i < totp.len; i++) {
+		totp[i].sprite.SetY(Window.GetHeight()/(2 + isDialog*0.2) - totp[i].sprite.GetImage().GetHeight()/2);
+	}
+
+	off = 0;
+	if (banner.GetImage()) off = 0.6;
+	else if (totp[0].sprite.GetImage()) off = 0.4;
+
+	dialog.q.SetY(Window.GetHeight()/(2 - off) - dialog.q.GetImage().GetHeight()/2);
+	dialog.a.SetY(Window.GetHeight()/(2 - off) - dialog.a.GetImage().GetHeight()/2 + dialog.q.GetImage().GetHeight());
+}
+
+fun RefreshCallback() {
+	for (i = 0; i < totp.len; i++) {
+		totp[i].sprite.SetImage(totp[i].frames[Math.Int(totp[i].c/5) % totp[i].frames.len]);
+		totp[i].c += 1;
+	}
+}
+Plymouth.SetRefreshFunction(RefreshCallback);
+
+fun DisplayBanner() {
+	global.totp = null;
+
+	BANNER_MAP.boot     = 404;
+	BANNER_MAP.resume   = 403;
+	BANNER_MAP.shutdown = 500;
+	BANNER_MAP.suspend  = 500;
+
+	H = Window.GetHeight() / 2;
+	W = H;
+
+	banner = Sprite(Image("r34/e/" + BANNER_MAP[Plymouth.GetMode()] + ".png").Scale(W, H));
+	banner.SetX(Window.GetWidth()/2 - W/2);
+
+	VerticalAlign();
+}
+
+fun DisplayTOTP(password) {
+	// TPM-TOTP is not trusted in the AFU state
+	if (Plymouth.GetMode() == "resume")
+		return;
+
+	global.banner = null;
+
+	FRAME_COUNTS = [22, 17, 16, 32, 10, 23, 11, 50, 31, 65];
+
+	H = Window.GetHeight() / 4;
+	W = H * 0.45;
+
+	totp.len = password.Length();
+	len_half = Math.Int(totp.len / 2);
+	for (i = 0; i < totp.len; i++) {
+		totp[i].c = 0;
+		totp[i].frames.len = FRAME_COUNTS[password.CharAt(i)];
+
+		for (j = 0; j < totp[i].frames.len; j++) {
+			totp[i].frames[j] = Image("r34/" + password.CharAt(i) + "/" + j + ".png").Scale(W, H);
+		}
+
+		totp[i].sprite = Sprite(totp[i].frames[Math.Int(totp[i].c/5) % totp[i].frames.len]);
+
+		if (totp.len % 2) {
+			if (i == len_half) {
+				totp[i].sprite.SetX(Window.GetWidth()/2 - totp[i].frames[0].GetWidth()/2);
+			} else {
+				totp[i].sprite.SetX(Window.GetWidth()/2 + (i-(totp.len/2))*totp[i].frames[0].GetWidth());
+			}
+		} else {
+			totp[i].sprite.SetX(Window.GetWidth()/2 + (i-(totp.len/2))*totp[i].frames[0].GetWidth());
+		}
+
+	}
+
+	VerticalAlign();
+}
+Plymouth.SetMessageFunction(DisplayTOTP);
+
+fun DisplayDialog(prompt, entry) {
+	if (!prompt) {
+		prompt = "PASSWORD";
+	}
+
+	dialog.q = Sprite(Image.Text(prompt, 0, 0, 0.6, 1, "Bold 36"));
+	dialog.q.SetX(Window.GetWidth()/2 - dialog.q.GetImage().GetWidth()/2);
+
+	dialog.a = Sprite(Image.Text(entry, 0, 0, 0.6, 1, "Fixed 24"));
+	dialog.a.SetX(Window.GetWidth()/2 - dialog.a.GetImage().GetWidth()/2);
+
+	VerticalAlign();
+}
+Plymouth.SetDisplayQuestionFunction(DisplayDialog);
+
+fun DisplayPassword(prompt, bulletCount) {
+	bullets = "";
+	for (i = 0; i < bulletCount; i++) {
+		bullets += "*";
+	}
+
+	DisplayDialog(prompt, bullets);
+}
+Plymouth.SetDisplayPasswordFunction(DisplayPassword);
+
+fun DisplayNormal() {
+	global.dialog = null;
+
+	VerticalAlign();
+}
+Plymouth.SetDisplayNormalFunction(DisplayNormal);

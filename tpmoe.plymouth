@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=tpmoe
+Description=booru counter totp boot attestation
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/tpmoe
+ScriptFile=/usr/share/plymouth/themes/tpmoe/tpmoe.script
