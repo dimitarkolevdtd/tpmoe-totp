@@ -24,6 +24,11 @@
     perSystem = { config, pkgs, ... }: {
       packages = {
         default = pkgs.callPackage ./nix/package.nix { };
+        test-interactive = config.checks.test.driverInteractive;
+      };
+
+      checks = {
+        test = pkgs.testers.runNixOSTest (import ./nix/test.nix inputs);
       };
     };
   });
