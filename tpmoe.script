@@ -83,7 +83,6 @@ fun DisplayTOTP(password) {
 		} else {
 			totp[i].sprite.SetX(Window.GetWidth()/2 + (i-(totp.len/2))*totp[i].frames[0].GetWidth());
 		}
-
 	}
 
 	VerticalAlign();
@@ -121,3 +120,5 @@ fun DisplayNormal() {
 	VerticalAlign();
 }
 Plymouth.SetDisplayNormalFunction(DisplayNormal);
+
+DisplayNormal();
