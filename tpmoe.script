@@ -94,10 +94,10 @@ fun DisplayDialog(prompt, entry) {
 		prompt = "PASSWORD";
 	}
 
-	dialog.q = Sprite(Image.Text(prompt, 0, 0, 0.6, 1, "Bold 36"));
+	dialog.q = Sprite(Image.Text(prompt, 0, 0, 0.6, 1, "Bold 24"));
 	dialog.q.SetX(Window.GetWidth()/2 - dialog.q.GetImage().GetWidth()/2);
 
-	dialog.a = Sprite(Image.Text(entry, 0, 0, 0.6, 1, "Fixed 24"));
+	dialog.a = Sprite(Image.Text(entry, 0, 0, 0.6, 1, "Fixed 16"));
 	dialog.a.SetX(Window.GetWidth()/2 - dialog.a.GetImage().GetWidth()/2);
 
 	VerticalAlign();
