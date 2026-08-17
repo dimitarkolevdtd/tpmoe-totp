@@ -1,0 +1,28 @@
+diff --git a/common/userpref.c b/common/userpref.c
+index 76945e1..ddb786c 100644
+--- a/common/userpref.c
++++ b/common/userpref.c
+@@ -156,6 +156,23 @@ const char *userpref_get_config_dir()
+ 	if (__config_dir)
+ 		return __config_dir;
+ 
++	/* Allow relocating the pairing record store. Needed where the default
++	   location is not writable, e.g. an Android shell with a read-only /var. */
++	{
++		const char *env_dir = getenv("LIBIMOBILEDEVICE_CONFIG_DIR");
++		if (env_dir && *env_dir) {
++			__config_dir = strdup(env_dir);
++			if (__config_dir) {
++				int i = strlen(__config_dir)-1;
++				while ((i > 0) && (__config_dir[i] == DIR_SEP)) {
++					__config_dir[i--] = '\0';
++				}
++			}
++			debug_info("initialized config_dir to %s (from LIBIMOBILEDEVICE_CONFIG_DIR)", __config_dir);
++			return __config_dir;
++		}
++	}
++
+ #ifdef _WIN32
+ 	wchar_t path[MAX_PATH+1];
+ 	HRESULT hr;
