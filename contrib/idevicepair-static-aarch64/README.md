@@ -25,14 +25,20 @@ su
 cd /data/local/tmp && chmod 755 usbmuxd idevicepair
 mkdir -p lockdown
 
+# IMPORTANT: export this BEFORE launching the daemon, not just for the client.
+# usbmuxd's preflight worker is itself a libusbmuxd client -- it connects back
+# to the mux to reach lockdownd, and resolves the address from this variable,
+# falling back to /var/run/usbmuxd. -S only sets the *listening* socket.
+export USBMUXD_SOCKET_ADDRESS=UNIX:/data/local/tmp/usbmuxd.sock
+
 # daemon: every writable path overridden, since /var/run and /var/lib do not
 # exist on Android
 ./usbmuxd -f -v -S /data/local/tmp/usbmuxd.sock \
           -P /data/local/tmp/usbmuxd.pid \
           -C /data/local/tmp/lockdown &
 
-# client: point it at that socket and config dir
-export USBMUXD_SOCKET_ADDRESS=UNIX:/data/local/tmp/usbmuxd.sock
+# client: needs the config dir too. The daemon does not -- it keeps its records
+# in its -C dir, and clients fetch pair records over the mux.
 export LIBIMOBILEDEVICE_CONFIG_DIR=/data/local/tmp/lockdown
 
 ./idevicepair systembuid     # confirms the client reaches the daemon
@@ -47,6 +53,45 @@ Note the asymmetry: `usbmuxd` already takes `-S`/`-C`/`-P` for its paths, but
 `LIBIMOBILEDEVICE_CONFIG_DIR` patch below. Both processes must agree on the
 config dir — that is where `SystemConfiguration.plist` and the per-device
 pairing records live.
+
+### `lockdown error -8`, and `idevicepair` says "No device found"
+
+Symptom: the daemon log shows the device connecting normally
+(`Connected to v2.0 device N`) but then
+`preflight_worker_handle_device_add: ERROR: Could not connect to lockdownd on
+device ..., lockdown error -8`, and every client reports "No device found" even
+though it talks to the socket fine.
+
+Cause: `USBMUXD_SOCKET_ADDRESS` was not exported for the *daemon* process. -8 is
+`LOCKDOWN_E_MUX_ERROR`; the preflight worker could not connect back to the mux,
+because without that variable libusbmuxd falls back to `/var/run/usbmuxd`. The
+device stays invisible because `client_device_add()` -- the call that announces a
+device to clients -- is only reached on preflight paths that get past
+`lockdownd_client_new()`; the error path jumps straight to cleanup.
+
+Fix: export it before launching usbmuxd, as shown above. Passing `-p`
+(`--no-preflight`) also works, and confirms the diagnosis immediately: it skips
+preflight and announces the device directly.
+
+### If the device never appears at all
+
+`0 device(s) detected` counts only VID `0x05ac` with PID in `0x1290-0x12af`
+(plus the T2 and Apple-Silicon-restore ranges), not USB devices in general.
+Recovery (`0x1281`) and DFU (`0x1227`) are deliberately outside that range.
+
+Check the device enumerated at the kernel level first -- the Android side must
+be explicitly in USB host mode, which phone-to-phone USB-C does not reliably
+negotiate on its own:
+
+```sh
+for d in /sys/bus/usb/devices/*/; do
+  [ -f "$d/idVendor" ] || continue
+  echo "$(basename $d) $(cat $d/idVendor):$(cat $d/idProduct)"
+done
+```
+
+`-f -vvv` additionally enables libusb's own debug logging, which shows the
+enumeration itself.
 
 ### If `usbmuxd` fails at startup
 
