@@ -33,9 +33,9 @@ fetch_tar() { # url dir
   local url="$1" dir="$2"
   cd "$SRC"
   [ -d "$dir" ] && return 0
-  curl -fsSL --retry 4 --retry-delay 2 --max-time 900 -o "$dir.tar.gz" "$url"
+  curl -fsSL --retry 4 --retry-delay 2 --max-time 900 -o "$dir.tar" "$url"
   mkdir -p "$dir"
-  tar xzf "$dir.tar.gz" -C "$dir" --strip-components=1
+  tar xf "$dir.tar" -C "$dir" --strip-components=1   # tar auto-detects gz/bz2
 }
 
 fetch_git() { # url dir [ref]
@@ -128,24 +128,55 @@ pin libtatsu 60a39f36d719344360ec2e87563ed43f61f0530f
 log "libimobiledevice"
 fetch_git https://github.com/libimobiledevice/libimobiledevice.git libimobiledevice
 pin libimobiledevice fa0f79190142bc309307967c058f89c1b36eb6b8
-# Make the pairing record location overridable via $LIBIMOBILEDEVICE_CONFIG_DIR;
-# the hardcoded /var/lib/lockdown is not writable on an Android shell.
-if ! git -C "$SRC/libimobiledevice" diff --quiet -- common/userpref.c; then
-  echo "patch already applied"
-else
+# 0001: make the pairing record location overridable via $LIBIMOBILEDEVICE_CONFIG_DIR;
+#       the hardcoded /var/lib/lockdown is not writable on an Android shell.
+# 0002: guard a NULL systembuid before printf. Upstream ignores the return of
+#       userpref_read_system_buid(); glibc prints "(null)" but musl segfaults,
+#       which happens on every `idevicepair systembuid` while usbmuxd is down.
+if git -C "$SRC/libimobiledevice" diff --quiet; then
   git -C "$SRC/libimobiledevice" apply "$ROOT/0001-userpref-configurable-config-dir.patch"
+  git -C "$SRC/libimobiledevice" apply "$ROOT/0002-idevicepair-systembuid-null-guard.patch"
+else
+  echo "patches already applied"
 fi
 build_am libimobiledevice --without-cython --with-openssl
 
 # libtool treats bare -static as "prefer static libtool libs", which still leaves
 # libc dynamic. -all-static is what actually produces a self-contained binary.
-log "relink static"
+log "relink idevicepair"
 cd "$SRC/libimobiledevice/tools"
 rm -f idevicepair
 make idevicepair LDFLAGS="-all-static -Wl,--gc-sections"
 cp idevicepair "$ROOT/idevicepair"
 "$STRIP" "$ROOT/idevicepair"
 
+############ usbmuxd daemon ############
+# --disable-udev: Android has no udev, so libusb uses the netlink backend and
+# enumerates by scanning /sys/bus/usb/devices directly.
+log "libusb"
+fetch_tar "https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27.tar.bz2" libusb
+if [ ! -f "$PREFIX/lib/libusb-1.0.a" ]; then
+  cd "$SRC/libusb"
+  ./configure --host="$HOST" --prefix="$PREFIX" --disable-shared --enable-static \
+    --disable-udev --disable-examples-build --disable-tests-build
+  make -j"$JOBS" && make install
+fi
+
+log "usbmuxd"
+fetch_git https://github.com/libimobiledevice/usbmuxd.git usbmuxd
+pin usbmuxd 3ded00c9985a5108cfc7591a309f9a23d57a8cba
+cd "$SRC/usbmuxd"
+NOCONFIGURE=1 ./autogen.sh
+./configure --host="$HOST" --prefix="$PREFIX" --without-systemd --without-udevrulesdir
+make -j"$JOBS"
+
+log "relink usbmuxd"
+cd "$SRC/usbmuxd/src"
+rm -f usbmuxd
+make usbmuxd LDFLAGS="-all-static -Wl,--gc-sections"
+cp usbmuxd "$ROOT/usbmuxd"
+"$STRIP" "$ROOT/usbmuxd"
+
 log "result"
-file "$ROOT/idevicepair"
-sha256sum "$ROOT/idevicepair"
+file "$ROOT/idevicepair" "$ROOT/usbmuxd"
+sha256sum "$ROOT/idevicepair" "$ROOT/usbmuxd"

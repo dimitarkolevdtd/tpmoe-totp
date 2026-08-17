@@ -1,0 +1,17 @@
+diff --git a/tools/idevicepair.c b/tools/idevicepair.c
+index 884c690..8d808cb 100644
+--- a/tools/idevicepair.c
++++ b/tools/idevicepair.c
+@@ -346,6 +346,12 @@ int main(int argc, char **argv)
+ 		char *systembuid = NULL;
+ 		userpref_read_system_buid(&systembuid);
+ 
++		if (!systembuid) {
++			fprintf(stderr, "ERROR: Could not retrieve the system BUID. Is usbmuxd running?\n");
++			result = EXIT_FAILURE;
++			goto leave;
++		}
++
+ 		printf("%s\n", systembuid);
+ 
+ 		free(systembuid);
