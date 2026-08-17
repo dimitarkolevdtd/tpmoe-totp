@@ -1,0 +1,16 @@
+diff --git a/shims/windows_shim.h b/shims/windows_shim.h
+index dfc70fc..6d40431 100644
+--- a/shims/windows_shim.h
++++ b/shims/windows_shim.h
+@@ -22,6 +22,11 @@ typedef struct timeval TIMEVAL;
+ #ifdef __cplusplus
+ #include <algorithm>
+ #include <string>
++/* libstdc++ 13 trimmed transitive includes that this codebase relied on
++   (e.g. Archiver.cpp uses std::vector without including <vector>). The shim is
++   force-included into every C++ TU, so pull them in here. */
++#include <vector>
++#include <cstdint>
+ extern std::string StringFromWideString(std::string wideString);
+ extern std::string WideStringFromString(std::string string);
+ #endif
