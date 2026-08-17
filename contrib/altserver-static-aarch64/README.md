@@ -4,8 +4,20 @@ A statically linked `AltServer-Linux` for aarch64, to run on an Android shell
 alongside the `usbmuxd`/`idevicepair` in `../idevicepair-static-aarch64`.
 
     AltServer-aarch64: ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
-    9.9 MB, 0 NEEDED entries
-    sha256 d99575daf5ea5202d5247d868cd9f64d019ca3089cccd15a9a8b118be79239c0
+    11 MB, 0 NEEDED entries
+    sha256 96ccad82176f14fdb1c8cc6ea19c06f31b8f430b47630d95862e4f55c64d410b
+
+## Version
+
+Built from AltServer-Windows **1.7.4** (2026-03-23), the newest that exists.
+There is no 1.8: upstream's tags stop at 1.5.2b and its highest release branch
+is 1.7.4. AltServer 1.8+ refers to the closed-source macOS app, which is not
+buildable here.
+
+Note that AltServer-Linux pins `upstream_repo` to AltServer-Windows' `develop`
+branch, which upstream abandoned in July 2022 at **1.5.0** -- older than their
+own 1.7.x branches. Building the project as-shipped therefore gives you 1.5.0.
+`bootstrap.sh` repoints it at 1.7.4; override with `ALTSERVER_VERSION`.
 
 Note this one is plain static, not static-PIE like the other two binaries (the
 upstream Makefile drives the final link). Static executables are loaded by the
@@ -41,6 +53,29 @@ that one still gets built from source.
   `shims/windows_shim.h`, which is force-included into every C++ TU and already
   pulls in `<algorithm>`/`<string>` behind an `#ifdef __cplusplus` guard.
 
+- `0002-altserver-1.7.4-port.patch` — catches AltServer-Linux's Windows-stripping
+  layer up to 1.7.x. The port works by regex-stripping Windows-only regions in
+  `rewrite_altserver_source.py`, and 1.7.4 moved that code, so the markers went
+  stale in both directions:
+  - `altstoreSourceURL`/`altstoreBundleID` moved *above* `REGISTRY_ROOT_KEY`, so
+    the registry-block strip swallowed them (which in turn poisoned the type of
+    `debugDescription` and produced misleading `CocoaError` overload errors).
+    Re-declared with production values.
+  - The constructor now seeds a notification-icon GUID via `CoCreateGuid`; that
+    icon is only used by the already-stripped `ShowNotification()`, so it goes.
+  - `ShowErrorAlert()` switched to `MessageBoxIndirectW`. The message-building
+    code above it is portable, so it is kept and routed to `ShowAlert()`.
+  - The `MessageBox` macro used string-literal concatenation; 1.7.x passes
+    non-literals, so it now uses `std::string(content) + ...`.
+  - `GUID` typedef added to `src/common.h`, beside the existing `typedef int HWND`.
+  - `-I$(LIB_DIR)`, because 1.7.x `DeviceManager.cpp` includes the *internal*
+    `<libimobiledevice/src/idevice.h>`.
+  - `-DHAVE_OPENSSL=1`, which must match
+    `makefiles/libimobiledevice-build/config.h`. That define selects the TLS
+    backend **and** the definition of `key_data_t` in `common/userpref.h`, so a
+    mismatch between AltServer's objects and the vendored library is a struct
+    layout mismatch across the link, not merely a missing header.
+
 `build.sh` additionally patches corecrypto in place, for two defects in Apple's
 public zip:
 
@@ -64,7 +99,19 @@ Beyond the static binary itself:
 
 - **usbmuxd.** AltServer is a mux client. The setup in
   `../idevicepair-static-aarch64` carries over unchanged, including
-  `USBMUXD_SOCKET_ADDRESS`.
+  `USBMUXD_SOCKET_ADDRESS`. Installing over USB is the default path and needs
+  nothing else:
+
+  ```sh
+  export USBMUXD_SOCKET_ADDRESS=UNIX:/data/local/tmp/usbmuxd.sock
+  ./AltServer-aarch64 -u <UDID> -a you@example.com -p 'password' app.ipa
+  ```
+
+  `AltServerMain.cpp` branches on whether an IPA argument is present: with one it
+  calls `InstallApplication()`, which reaches the device through libimobiledevice
+  → usbmuxd → the cable, with no mDNS involved. Without one it enters server mode,
+  which is the only path that needs the mDNS advertising below. Re-running the
+  install command is also how you refresh a 7-day cert over USB.
 - **An anisette server.** Apple's GSA authentication requires anisette data that
   cannot be generated off-Apple-hardware. `ALTSERVER_ANISETTE_SERVER` defaults to
   a third-party host, which means your Apple ID credentials transit a machine you

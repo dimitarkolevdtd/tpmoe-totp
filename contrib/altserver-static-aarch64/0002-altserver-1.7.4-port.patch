@@ -1,0 +1,116 @@
+diff --git a/Makefile b/Makefile
+index 0d3ce07..9a438fe 100644
+--- a/Makefile
++++ b/Makefile
+@@ -17,6 +17,12 @@ endif
+ CXXFLAGS = $(CFLAGS) -std=c++17
+ 
+ CFLAGS += -DNO_USBMUXD_STUB
++# Must match makefiles/libimobiledevice-build/config.h, which builds the vendored
++# libimobiledevice with HAVE_OPENSSL. 1.7.x DeviceManager.cpp pulls in the internal
++# idevice.h -> common/userpref.h, where this selects both the TLS backend and the
++# definition of key_data_t -- so a mismatch here is a struct layout mismatch, not
++# just a missing include.
++CFLAGS += -DHAVE_OPENSSL=1
+ 
+ ROOT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+ include $(ROOT_DIR)/makefiles/main.mak
+@@ -56,6 +62,9 @@ INC_CFLAGS += $(libimobiledevice_include)
+ INC_CFLAGS += $(libplist_include)
+ INC_CFLAGS += $(altsign_include)
+ INC_CFLAGS += $(dnssd_loader_include)
++# 1.7.x DeviceManager.cpp includes <libimobiledevice/src/idevice.h> (an internal
++# header). Added last so the public include dirs above still win.
++INC_CFLAGS += -I$(LIB_DIR)
+ 
+ include $(ROOT_DIR)/makefiles/AltWindowsShim.mak
+ 
+diff --git a/makefiles/rewrite_altserver_source.py b/makefiles/rewrite_altserver_source.py
+index 13de09c..e7408b3 100644
+--- a/makefiles/rewrite_altserver_source.py
++++ b/makefiles/rewrite_altserver_source.py
+@@ -17,6 +17,13 @@ content = content.replace(b'std::string_convert', b'std::wstring_convert')
+ content = content.replace(b'boost/filesystem.hpp', b'filesystem')
+ content = content.replace(b'boost::filesystem', b'std::filesystem')
+ 
++# Windows-only headers, stripped for every file rather than per-file: AltServer
++# 1.7.x introduced AltInclude.h (pulled in by ClientConnection.cpp and others)
++# which includes <windows.h> and <debugapi.h>, and AltServerApp.cpp gained
++# <Guiddef.h>. None of these can ever resolve on Linux.
++for _win_hdr in (b'windows.h', b'windowsx.h', b'debugapi.h', b'Guiddef.h', b'guiddef.h'):
++    content = re.sub(br'#include\s*<' + re.escape(_win_hdr) + br'>\s*\n', b'', content)
++
+ if F.endswith('AltServerApp.cpp'):
+ 
+     # MessageBox
+@@ -42,13 +49,32 @@ if F.endswith('AltServerApp.cpp'):
+     content = removePart(content, br'void AltServerApp::ShowNotification', br'\nvoid AltServerApp::ShowErrorAlert')
+     content = removePart(content, br'bool AltServerApp::CheckDependencies', br'\nfs::path AltServerApp::certificatesDirectoryPath')
+ 
++    # 1.7.x: the constructor seeds a notification-icon GUID through Win32 COM.
++    # The icon is only used by ShowNotification(), which is stripped above.
++    content = re.sub(br'\tHRESULT result = CoCreateGuid\([\s\S]+?\n\t\}\n', b'', content)
++
++    # 1.7.x: ShowErrorAlert() switched to MessageBoxIndirectW. Everything above
++    # that call is portable message-building, so keep it and route the result to
++    # ShowAlert(), which the rest of this file already uses on Linux.
++    content = re.sub(
++        br'\tauto wideTitle = WideStringFromString\(localizedTitle\);[\s\S]+?MessageBoxIndirectW\(&parameters\);',
++        b'\tthis->ShowAlert(localizedTitle, message);',
++        content)
++
+     def insertBefore(content, marker, newcontent):
+         content = content.replace(marker, newcontent + b'\n' + marker)
+         return content
+     
+     content = insertBefore(content, b'AltServerApp* AltServerApp::_instance = nullptr;', br'''
+ #define IDCANCEL 0
+-#define MessageBox(x, content, title, xx) (this->ShowAlert(title, content " (Ctrl-C to avoid)"), 1)
++// std::string(content), not `content "..."`: 1.7.x calls MessageBox with
++// non-literal arguments, which string-literal concatenation cannot handle.
++#define MessageBox(x, content, title, xx) (this->ShowAlert(title, std::string(content) + " (Ctrl-C to avoid)"), 1)
++
++// 1.7.x moved these two constants above REGISTRY_ROOT_KEY, so the Windows
++// registry block removal below now swallows them. Re-declare production values.
++std::string altstoreSourceURL = "https://apps.altstore.io";
++std::string altstoreBundleID = "com.rileytestut.AltStore";
+ 
+ // Observes all exceptions that occurred in all tasks in the given range.
+ template<class T, class InIt>
+diff --git a/shims/windows_shim.h b/shims/windows_shim.h
+index dfc70fc..6d40431 100644
+--- a/shims/windows_shim.h
++++ b/shims/windows_shim.h
+@@ -22,6 +22,11 @@ typedef struct timeval TIMEVAL;
+ #ifdef __cplusplus
+ #include <algorithm>
+ #include <string>
++/* libstdc++ 13 trimmed transitive includes that this codebase relied on
++   (e.g. Archiver.cpp uses std::vector without including <vector>). The shim is
++   force-included into every C++ TU, so pull them in here. */
++#include <vector>
++#include <cstdint>
+ extern std::string StringFromWideString(std::string wideString);
+ extern std::string WideStringFromString(std::string string);
+ #endif
+diff --git a/src/common.h b/src/common.h
+index 3053b68..f83afd3 100644
+--- a/src/common.h
++++ b/src/common.h
+@@ -5,6 +5,16 @@
+ typedef int HWND;
+ typedef int HINSTANCE;
+ 
++/* AltServer 1.7.x adds `GUID _notificationIconGUID` to AltServerApp.h. It is
++   only touched by ShowNotification(), which rewrite_altserver_source.py strips,
++   so the layout just has to exist -- it is never used on Linux. */
++typedef struct _GUID {
++    uint32_t Data1;
++    uint16_t Data2;
++    uint16_t Data3;
++    uint8_t  Data4[8];
++} GUID;
++
+ #define DEBUG_PRINT(...) do { \
+         fprintf(stderr, "[%s:%d] ", __FUNCTION__, __LINE__); \
+         fprintf(stderr, __VA_ARGS__); \

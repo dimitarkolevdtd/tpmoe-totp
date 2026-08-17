@@ -83,8 +83,16 @@ fi
 [ -d libzip ]           || git clone -q --depth 1 https://github.com/nih-at/libzip.git libzip
 [ -d AltServer-Linux ]  || git clone -q --recursive https://github.com/NyaMisty/AltServer-Linux.git AltServer-Linux
 
+# AltServer-Linux pins upstream_repo to AltServer-Windows' `develop` branch, which
+# upstream abandoned in 2022 at 1.5.0 -- older than their own 1.7.x release
+# branches. Track 1.7.4, the newest that exists. (There is no 1.8.)
+git -C AltServer-Linux/upstream_repo fetch -q --depth 200 origin "${ALTSERVER_VERSION:-1.7.4}"
+git -C AltServer-Linux/upstream_repo checkout -q FETCH_HEAD
+
 # std::vector used without <vector>; libstdc++ 13 no longer pulls it in transitively.
 git -C AltServer-Linux apply "$ROOT/0001-shim-missing-includes.patch" 2>/dev/null || true
+# Catches AltServer-Linux's Windows-stripping layer up to 1.7.x (see README).
+git -C AltServer-Linux apply "$ROOT/0002-altserver-1.7.4-port.patch" 2>/dev/null || true
 
 cp "$ROOT/build.sh" "$ROOTFS/buildenv/build.sh"
 chmod +x "$ROOTFS/buildenv/build.sh"
